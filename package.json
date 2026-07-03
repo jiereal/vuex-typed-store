@@ -1,0 +1,38 @@
+{
+  "name": "vuex-typed-store",
+  "version": "0.1.0",
+  "description": "Strongly typed Vuex Store wrapper with recursive module path inference for state/mutations/actions/getters.",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:types": "vitest --typecheck.only --run"
+  },
+  "keywords": [
+    "vuex",
+    "typescript",
+    "store",
+    "typed",
+    "module"
+  ],
+  "peerDependencies": {
+    "vue": "^2.6.x",
+    "vuex": "^3.x"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.0",
+    "vue": "2.6.14",
+    "vuex": "3.6.2",
+    "vitest": "^1.6.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,626 @@
+/**
+ * 类型层面测试
+ *
+ * 验证 GetModule* 系列类型、Store 泛型、ActionContext 等的类型推导正确性。
+ *
+ * 使用 vitest 的 expectTypeOf + assertType，以及 @ts-expect-error 负向验证。
+ */
+import Vue from 'vue';
+import Vuex from 'vuex';
+import { describe, it, expectTypeOf, assertType } from 'vitest';
+import {
+  GetModuleName,
+  GetModuleState,
+  GetModuleMutations,
+  GetModuleActions,
+  GetModuleGetters,
+  GetModuleActionContext,
+  GetRestFuncType,
+  GetPayLoad,
+  Store
+} from '../src/store';
+import { IsNonKeyOf, UnionToIntersection } from '../src/types';
+import { GetVuexHelperMutations } from '../src/helper';
+
+Vue.use(Vuex);
+
+/* ============================================================================
+ * 测试用模块定义
+ * ==========================================================================*/
+
+const accountState = {
+  userId: '',
+  token: '',
+  permissions: [] as string[]
+};
+
+const accountMutations = {
+  setToken(state: typeof accountState, token: string) {
+    state.token = token;
+  },
+  logout(state: typeof accountState) {
+    state.token = '';
+  }
+};
+
+const accountActions = {
+  async login(_ctx: any, payload: { userId: string; password: string }) {
+    return { success: true as const, token: 'fake' };
+  },
+  async refresh(_ctx: any) {
+    return { ok: true as const };
+  }
+};
+
+const accountGetters = {
+  hasToken: (state: typeof accountState) => state.token !== '',
+  tokenLength: (state: typeof accountState) => state.token.length
+};
+
+const accountModule = {
+  state: accountState,
+  mutations: accountMutations,
+  actions: accountActions,
+  getters: accountGetters
+};
+
+const settingState = { theme: 'light' as 'light' | 'dark' };
+const settingMutations = {
+  setTheme(state: typeof settingState, theme: 'light' | 'dark') {
+    state.theme = theme;
+  }
+};
+const settingModule = { state: settingState, mutations: settingMutations };
+
+type IRootSubModules = {
+  account?: typeof accountModule;
+  setting?: typeof settingModule;
+};
+
+const rootMutations = {
+  ping() {}
+};
+
+/* ============================================================================
+ * 工具类型基础
+ * ==========================================================================*/
+
+describe('utility types', () => {
+  it('IsNonKeyOf 判断空对象', () => {
+    assertType<IsNonKeyOf<undefined>>(true as any);
+    assertType<IsNonKeyOf<{}>>(true as any);
+    assertType<IsNonKeyOf<{ a: 1 }>>(false as any);
+  });
+
+  it('UnionToIntersection 联合转交叉', () => {
+    type R = UnionToIntersection<{ a: 1 } | { b: 2 }>;
+    expectTypeOf<R>().toEqualTypeOf<{ a: 1 } & { b: 2 }>();
+  });
+
+  it('GetRestFuncType 移除函数第一个参数', () => {
+    type F1 = GetRestFuncType<(ctx: any, a: string, b: number) => boolean>;
+    expectTypeOf<F1>().toEqualTypeOf<(a: string, b: number) => boolean>();
+
+    type F2 = GetRestFuncType<(ctx: any) => void>;
+    expectTypeOf<F2>().toEqualTypeOf<() => void>();
+  });
+});
+
+/* ============================================================================
+ * GetModuleName 路径拼接
+ * ==========================================================================*/
+
+describe('GetModuleName', () => {
+  it('空 prefix 直接返回 property', () => {
+    type R = GetModuleName<'', '/', 'setToken'>;
+    expectTypeOf<R>().toEqualTypeOf<'setToken'>();
+  });
+
+  it('有 prefix 拼接 separator + property', () => {
+    type R = GetModuleName<'account', '/', 'setToken'>;
+    expectTypeOf<R>().toEqualTypeOf<'account/setToken'>();
+  });
+
+  it('嵌套 prefix', () => {
+    type R = GetModuleName<'a/b', '/', 'mut'>;
+    expectTypeOf<R>().toEqualTypeOf<'a/b/mut'>();
+  });
+});
+
+/* ============================================================================
+ * GetModuleState 推导
+ * ==========================================================================*/
+
+describe('GetModuleState', () => {
+  it('单模块 state', () => {
+    type R = GetModuleState<typeof accountState>;
+    expectTypeOf<R>().toEqualTypeOf<typeof accountState>();
+  });
+
+  it('嵌套子模块 state', () => {
+    type R = GetModuleState<undefined, IRootSubModules>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      account?: typeof accountState;
+      setting?: typeof settingState;
+    }>();
+  });
+});
+
+/* ============================================================================
+ * GetModuleMutations 推导
+ * ==========================================================================*/
+
+describe('GetModuleMutations', () => {
+  it('单模块 mutations 带路径', () => {
+    type R = GetModuleMutations<typeof accountMutations, typeof accountState>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      'account/setToken'?: (token: string) => void;
+    }>();
+  });
+
+  it('空 prefix 不带路径', () => {
+    type R = GetModuleMutations<typeof accountMutations, typeof accountState, undefined, ''>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      setToken?: (token: string) => void;
+    }>();
+  });
+
+  it('嵌套子模块 mutations', () => {
+    type R = GetModuleMutations<typeof rootMutations, undefined, IRootSubModules>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      ping?: () => void;
+      'account/setToken'?: (token: string) => void;
+      'account/logout'?: () => void;
+      'setting/setTheme'?: (theme: 'light' | 'dark') => void;
+    }>();
+  });
+});
+
+/* ============================================================================
+ * GetVuexHelperMutations 自动推导
+ * ==========================================================================*/
+
+describe('GetVuexHelperMutations', () => {
+  it('生成 set / merge / push / pop 等 mutations', () => {
+    type R = GetVuexHelperMutations<typeof accountState>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      'userId.set': (v: string) => void;
+      'userId.merge': (v: Partial<string>) => void;
+      'permissions.push': (v: string) => void;
+      'permissions.pop': () => void;
+    }>();
+  });
+
+  it('undefined 输入返回空对象', () => {
+    type R = GetVuexHelperMutations<undefined>;
+    expectTypeOf<R>().toEqualTypeOf<{}>();
+  });
+});
+
+/* ============================================================================
+ * GetModuleActions 推导
+ * ==========================================================================*/
+
+describe('GetModuleActions', () => {
+  it('单模块 actions 带路径', () => {
+    type R = GetModuleActions<typeof accountActions, undefined, 'account'>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      'account/login': (payload: { userId: string; password: string }) => any;
+    }>();
+  });
+
+  it('嵌套子模块 actions', () => {
+    type R = GetModuleActions<undefined, IRootSubModules>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      'account/login'?: (payload: { userId: string; password: string }) => any;
+    }>();
+  });
+});
+
+/* ============================================================================
+ * GetModuleGetters 推导
+ * ==========================================================================*/
+
+describe('GetModuleGetters', () => {
+  it('保留返回值类型', () => {
+    type R = GetModuleGetters<typeof accountGetters, undefined, 'account'>;
+    expectTypeOf<R>().toMatchTypeOf<{
+      'account/hasToken': boolean;
+      'account/tokenLength': number;
+    }>();
+  });
+});
+
+/* ============================================================================
+ * GetPayLoad 推导
+ * ==========================================================================*/
+
+describe('GetPayLoad', () => {
+  it('取 mutation 第一个业务参数', () => {
+    type Mut = { setToken: (state: any, token: string) => void };
+    type R = GetPayLoad<Mut, 'setToken'>;
+    expectTypeOf<R>().toEqualTypeOf<string>();
+  });
+
+  it('无参数 mutation 返回 undefined', () => {
+    type Mut = { logout: (state: any) => void };
+    type R = GetPayLoad<Mut, 'logout'>;
+    expectTypeOf<R>().toEqualTypeOf<undefined>();
+  });
+});
+
+/* ============================================================================
+ * GetModuleActionContext 推导
+ * ==========================================================================*/
+
+describe('GetModuleActionContext', () => {
+  type LocalMut = { setToken: (token: string) => void };
+  type RootMut = { ping: () => void };
+  type LocalAct = { refresh: () => Promise<{ ok: true }> };
+  type RootAct = { globalReset: () => Promise<void> };
+  type Ctx = GetModuleActionContext<
+    typeof accountState,
+    LocalMut,
+    LocalAct,
+    any,
+    any,
+    RootMut,
+    RootAct,
+    any
+  >;
+
+  it('commit 本地 mutation payload 正确', () => {
+    type CommitFn = Ctx['commit'];
+    expectTypeOf<CommitFn>().toBeCallableWith('setToken', 'abc');
+  });
+
+  it('commit root: true 调用根 mutation', () => {
+    type CommitFn = Ctx['commit'];
+    expectTypeOf<CommitFn>().toBeCallableWith('ping', undefined, { root: true });
+  });
+
+  it('dispatch 本地 action 返回 Promise', () => {
+    type DispatchFn = Ctx['dispatch'];
+    // @ts-expect-error - refresh 不接受参数
+    expectTypeOf<DispatchFn>().returns.toEqualTypeOf<Promise<{ ok: true }>>();
+  });
+
+  it('state / rootState 类型正确', () => {
+    expectTypeOf<Ctx['state']>().toEqualTypeOf<typeof accountState>();
+  });
+});
+
+/* ============================================================================
+ * Store 实例类型
+ * ==========================================================================*/
+
+describe('Store instance types', () => {
+  type Mutations = {
+    'account/setToken': (token: string) => void;
+    'setting/setTheme': (theme: 'light' | 'dark') => void;
+  };
+  type Actions = {
+    'account/login': (payload: { userId: string; password: string }) => Promise<{ success: true }>;
+  };
+  type TestStore = Store<undefined, Mutations, Actions, undefined, undefined>;
+
+  // 创建一个真实但空的实例用于类型测试
+  const store: TestStore = new Store<undefined, Mutations, Actions, undefined, undefined>({ state: {} });
+
+  it('commit 强类型 payload', () => {
+    expectTypeOf(store.commit).toBeCallableWith('account/setToken', 'abc');
+    expectTypeOf(store.commit).toBeCallableWith('setting/setTheme', 'dark');
+  });
+
+  it('dispatch 返回值自动包裹 Promise', () => {
+    // 用 expectTypeOf 直接验证 dispatch 的返回类型（不实际调用）
+    expectTypeOf(store.dispatch).returns.toEqualTypeOf<Promise<{ success: true }>>();
+  });
+
+  it('state / getters 有正确类型', () => {
+    // 验证类型存在且不为 never/undefined
+    expectTypeOf(store.state).not.toBeNever();
+    expectTypeOf(store.getters).not.toBeNever();
+  });
+
+  it('storeInstance 是 readonly', () => {
+    expectTypeOf(store.storeInstance).not.toBeNever();
+    // @ts-expect-error - readonly 不允许赋值
+    store.storeInstance = null;
+  });
+});
+
+/* ============================================================================
+ * 懒加载场景：SubModules 用可选字段
+ * ==========================================================================*/
+
+describe('lazy-loaded submodules', () => {
+  type RootMutations = GetModuleMutations<typeof rootMutations, undefined, IRootSubModules>;
+  type RootActions = GetModuleActions<undefined, IRootSubModules>;
+
+  it('mutations 路径推导正确', () => {
+    expectTypeOf<RootMutations>().toMatchTypeOf<{
+      'account/setToken'?: (token: string) => void;
+      'setting/setTheme'?: (theme: 'light' | 'dark') => void;
+    }>();
+  });
+
+  it('actions 路径推导正确', () => {
+    expectTypeOf<RootActions>().toMatchTypeOf<{
+      'account/login'?: (payload: { userId: string; password: string }) => any;
+    }>();
+  });
+});
+
+/* ============================================================================
+ * createMutations 生成的 mutations 与 GetVuexHelperMutations 类型对应
+ * ==========================================================================*/
+
+describe('createMutations type mapping', () => {
+  it('生成的 mutations 名字与 GetVuexHelperMutations 完全一致', () => {
+    interface S {
+      name: string;
+      list: number[];
+      profile: { age: number };
+    }
+    type Expected = GetVuexHelperMutations<S>;
+
+    // set / merge 对所有字段都存在
+    expectTypeOf<Expected>().toMatchTypeOf<{
+      'name.set': (v: string) => void;
+      'name.merge': (v: Partial<string>) => void;
+      'list.set': (v: number[]) => void;
+      'list.merge': (v: Partial<number[]>) => void;
+      'profile.set': (v: { age: number }) => void;
+      'profile.merge': (v: Partial<{ age: number }>) => void;
+    }>();
+
+    // 数组字段额外有 push/pop/shift/unshift/concat/splice
+    expectTypeOf<Expected>().toMatchTypeOf<{
+      'list.push': (v: number) => void;
+      'list.pop': () => void;
+      'list.shift': () => void;
+      'list.unshift': (v: number) => void;
+      'list.concat': (v: number | number[]) => void;
+      'list.splice': (v: [start: number, deleteCount: number, ...items: number[]]) => void;
+    }>();
+
+    // 非数组字段这些方法的类型为 never
+    expectTypeOf<Expected['name.push']>().toBeNever();
+    expectTypeOf<Expected['profile.pop']>().toBeNever();
+  });
+});
+
+/* ============================================================================
+ * 参考 access-history 真实结构的完整类型校验
+ *
+ * 结构：
+ *   state: { accessHistories: AccessHistory[] }
+ *   mutations: { reSort } + 自动生成的 accessHistories.push/set/…
+ *   actions: { addHistory, clearAll }
+ * ==========================================================================*/
+
+describe('access-history style module - type validation', () => {
+  interface AccessHistory {
+    id: string;
+    title: string;
+    updateTime: number;
+  }
+
+  const accessHistoryState = {
+    accessHistories: [] as AccessHistory[]
+  };
+
+  const accessHistoryMutations = {
+    reSort(state: typeof accessHistoryState) {
+      state.accessHistories.sort((a, b) => b.updateTime - a.updateTime);
+    }
+  };
+
+  const accessHistoryActions = {
+    async addHistory(_ctx: any, item: AccessHistory) {
+      return item;
+    },
+    async clearAll() {}
+  };
+
+  const accessHistoryModule = {
+    state: accessHistoryState,
+    mutations: accessHistoryMutations,
+    actions: accessHistoryActions
+  };
+
+  type IRootSubModules = {
+    accessHistory?: typeof accessHistoryModule;
+  };
+
+  // 推导出的完整类型
+  type IAccessHistoryState = GetModuleState<typeof accessHistoryState>;
+  type IAccessHistoryMutations = GetModuleMutations<
+    typeof accessHistoryMutations,
+    typeof accessHistoryState
+  >;
+  type IAccessHistoryActions = GetModuleActions<typeof accessHistoryActions>;
+  type IRootMutations = GetModuleMutations<undefined, undefined, IRootSubModules>;
+  type IRootActions = GetModuleActions<undefined, IRootSubModules>;
+
+  it('state 类型推导正确', () => {
+    expectTypeOf<IAccessHistoryState>().toEqualTypeOf<{
+      accessHistories: AccessHistory[];
+    }>();
+  });
+
+  it('本地 mutations 包含 reSort + 自动生成的 accessHistories.*', () => {
+    expectTypeOf<IAccessHistoryMutations>().toMatchTypeOf<{
+      reSort?: () => void;
+      'accessHistories.set'?: (v: AccessHistory[]) => void;
+      'accessHistories.push'?: (v: AccessHistory) => void;
+      'accessHistories.pop'?: () => void;
+    }>();
+  });
+
+  it('根 mutations 带路径前缀', () => {
+    expectTypeOf<IRootMutations>().toMatchTypeOf<{
+      'accessHistory/reSort'?: () => void;
+      'accessHistory/accessHistories.push'?: (v: AccessHistory) => void;
+    }>();
+  });
+
+  it('根 actions 带路径前缀', () => {
+    expectTypeOf<IRootActions>().toMatchTypeOf<{
+      'accessHistory/addHistory'?: (item: AccessHistory) => any;
+      'accessHistory/clearAll'?: () => any;
+    }>();
+  });
+
+  it('Store 实例的 commit 类型校验', () => {
+    type TestStore = Store<undefined, IRootMutations, IRootActions, undefined, IRootSubModules>;
+    const store: TestStore = new Store<undefined, IRootMutations, IRootActions, undefined, IRootSubModules>({
+      state: {},
+      modules: {}
+    });
+
+    // ✅ 正确调用
+    expectTypeOf(store.commit).toBeCallableWith('accessHistory/reSort', undefined);
+    expectTypeOf(store.commit).toBeCallableWith(
+      'accessHistory/accessHistories.push',
+      { id: '1', title: 'x', updateTime: 100 }
+    );
+
+    // ✅ dispatch 正确调用
+    expectTypeOf(store.dispatch).toBeCallableWith('accessHistory/addHistory', {
+      id: '1',
+      title: 'x',
+      updateTime: 100
+    });
+  });
+
+  it('Store 实例的 commit/dispatch 拒绝错误调用', () => {
+    type TestStore = Store<undefined, IRootMutations, IRootActions, undefined, IRootSubModules>;
+    const store: TestStore = new Store<undefined, IRootMutations, IRootActions, undefined, IRootSubModules>({
+      state: {},
+      modules: {}
+    });
+
+    // ❌ 不存在的 mutation
+    // @ts-expect-error
+    store.commit('accessHistory/nonExistent');
+
+    // ❌ mutation payload 类型错误（期望 AccessHistory，传了 string）
+    // @ts-expect-error
+    store.commit('accessHistory/accessHistories.push', 'not-an-object');
+
+    // ❌ 不存在的 action
+    // @ts-expect-error
+    store.dispatch('accessHistory/nonExistent');
+
+    // ❌ action payload 类型错误
+    // @ts-expect-error
+    store.dispatch('accessHistory/addHistory', { id: '1' }); // 缺 title / updateTime
+  });
+
+  it('state 访问带完整类型', () => {
+    type TestStore = Store<undefined, IRootMutations, IRootActions, undefined, IRootSubModules>;
+    const store: TestStore = new Store<undefined, IRootMutations, IRootActions, undefined, IRootSubModules>({
+      state: {},
+      modules: {}
+    });
+
+    // 整体 state 类型正确
+    expectTypeOf(store.state).toMatchTypeOf<{
+      accessHistory?: {
+        accessHistories: AccessHistory[];
+      };
+    }>();
+
+    // 用类型层面访问内部字段（不触发运行时）
+    type AccessHistoryArrayType = NonNullable<typeof store.state.accessHistory>['accessHistories'];
+    expectTypeOf<AccessHistoryArrayType>().toEqualTypeOf<AccessHistory[]>();
+  });
+});
+
+/* ============================================================================
+ * dispatch 返回值类型推导
+ * ==========================================================================*/
+
+describe('dispatch return type inference', () => {
+  const actions = {
+    async fetchUser() {
+      return { id: 'u1', name: 'Alice' };
+    },
+    async fetchList() {
+      return [1, 2, 3] as number[];
+    },
+    syncAction() {
+      return 42;
+    }
+  };
+
+  type Acts = typeof actions;
+  type ActStore = Store<undefined, undefined, Acts, undefined, undefined>;
+  const store: ActStore = new Store<undefined, undefined, Acts, undefined, undefined>({
+    state: {},
+    actions
+  });
+
+  it('async action 返回解包后的 Promise', () => {
+    const r1 = store.dispatch('fetchUser');
+    expectTypeOf(r1).toEqualTypeOf<Promise<{ id: string; name: string }>>();
+
+    const r2 = store.dispatch('fetchList');
+    expectTypeOf(r2).toEqualTypeOf<Promise<number[]>>();
+  });
+
+  it('同步 action 也被包裹为 Promise', () => {
+    const r = store.dispatch('syncAction');
+    expectTypeOf(r).toEqualTypeOf<Promise<number>>();
+  });
+});
+
+/* ============================================================================
+ * commit 的 payload 推导边界
+ * ==========================================================================*/
+
+describe('commit payload boundary cases', () => {
+  const mutations = {
+    noPayload(state: { x: number }) {
+      state.x += 1;
+    },
+    optionalLike(state: { x: number }, v?: number) {
+      state.x += v ?? 1;
+    },
+    withPayload(state: { x: number }, v: number) {
+      state.x = v;
+    },
+    unionPayload(state: { x: number }, v: number | string) {
+      state.x = typeof v === 'number' ? v : v.length;
+    }
+  };
+
+  type Muts = typeof mutations;
+  type MutStore = Store<undefined, Muts, undefined, undefined, undefined>;
+  const store: MutStore = new Store<undefined, Muts, undefined, undefined, undefined>({
+    state: { x: 0 },
+    mutations
+  });
+
+  it('无参 mutation 不传 payload', () => {
+    expectTypeOf(store.commit).toBeCallableWith('noPayload', undefined);
+  });
+
+  it('有参 mutation 必须传正确类型', () => {
+    expectTypeOf(store.commit).toBeCallableWith('withPayload', 42);
+  });
+
+  it('联合类型 payload 接受联合中的任意一种', () => {
+    expectTypeOf(store.commit).toBeCallableWith('unionPayload', 42);
+    expectTypeOf(store.commit).toBeCallableWith('unionPayload', 'hello');
+  });
+
+  it('拒绝错误类型的 payload', () => {
+    // @ts-expect-error - 期望 number，传 boolean
+    store.commit('withPayload', true);
+    // @ts-expect-error - 期望 number | string，传 object
+    store.commit('unionPayload', {});
+  });
+});

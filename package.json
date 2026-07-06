@@ -1,5 +1,5 @@
 {
-  "name": "vuex-typed-store",
+  "name": "@jiereal/vuex-typed-store",
   "version": "0.1.0",
   "description": "Strongly typed Vuex Store wrapper with recursive module path inference for state/mutations/actions/getters.",
   "main": "dist/index.js",
@@ -34,5 +34,9 @@
     "vuex": "3.6.2",
     "vitest": "^1.6.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
 }

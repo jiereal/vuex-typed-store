@@ -47,20 +47,23 @@ export type GetParam<T> = T extends () => any ? undefined : T extends (arg: infe
  * 例: `GetModuleName<'user', '/', 'login'>` → `'user/login'`
  *      `GetModuleName<'', '/', 'login'>`    → `'login'`
  */
-export type GetModuleName<Prefix, Separator, Property> = Prefix extends ''
-  ? `${string & Property}`
-  : `${string & Prefix}${string & Separator}${string & Property}`;
+export type GetModuleName<Prefix extends string, Separator extends string, Property extends string> =
+  Prefix extends ''
+    ? Property
+    : `${Prefix}${Separator}${Property}`;
 
 /**
  * 把 `{ foo: fn }` 映射为 `{ "module/foo": 去context后的fn }`
  */
 export type GetRestMaps<
   ModuleName extends string,
-  obj extends { [key: string]: any },
+  obj extends any,
   Separator extends string = '/'
-> = {
-  [Property in keyof obj as GetModuleName<ModuleName, Separator, Property>]: GetRestFuncType<obj[Property]>;
-};
+> = obj extends infer O
+  ? {
+      [Property in keyof O as GetModuleName<ModuleName, Separator, Extract<Property, string>>]: GetRestFuncType<O[Property]>;
+    }
+  : never;
 
 /**
  * 取某个 key 对应的 value 类型（排除非函数项）
@@ -77,11 +80,13 @@ export type GetPayLoad<T, K extends keyof T> = GetParam<GetTypeOfKey<T, K>>;
  */
 export type GetGetterReturnType<
   ModuleName extends string,
-  obj extends { [key: string]: any },
+  obj extends any,
   Separator extends string = '/'
-> = {
-  [Property in keyof obj as GetModuleName<ModuleName, Separator, Property>]: ReturnType<obj[Property]>;
-};
+> = obj extends infer O
+  ? {
+      [Property in keyof O as GetModuleName<ModuleName, Separator, Extract<Property, string>>]: O[Property] extends (...args: any) => any ? ReturnType<O[Property]> : never;
+    }
+  : never;
 
 /**
  * 把 helper 自动生成的 mutations 也带上模块前缀
@@ -92,7 +97,7 @@ export type GetVuexHelperStateMutations<
   Separator extends string = '/',
   Mutations = GetVuexHelperMutations<State>
 > = {
-  [Property in keyof Mutations as GetModuleName<ModuleName, Separator, Property>]: Mutations[Property];
+  [Property in keyof Mutations as GetModuleName<Extract<ModuleName, string>, Separator, Extract<Property, string>>]: Mutations[Property];
 };
 
 /* -------------------------------------- Mutations -------------------------------------- */
@@ -109,7 +114,7 @@ export type GetModuleMutations<
 > = (IsNonKeyOf<SubModules> extends false
   ? UnionToIntersection<GetSubModuleMutations<SubModules, ModuleName, Separator>>
   : unknown) &
-  (IsNonKeyOf<Mutations> extends false ? GetRestMaps<ModuleName, Mutations & KeyValues> : unknown) &
+  (IsNonKeyOf<Mutations> extends false ? GetRestMaps<ModuleName, Mutations> : unknown) &
   (IsNonKeyOf<State> extends false ? GetVuexHelperStateMutations<ModuleName, State, Separator> : unknown);
 
 /**
@@ -125,7 +130,7 @@ export type GetSubModuleMutations<
         getProperty<SubModules[SubModuleName], 'mutations'>,
         getProperty<SubModules[SubModuleName], 'state'>,
         getProperty<SubModules[SubModuleName], 'modules'>,
-        GetModuleName<ModuleName, Separator, SubModuleName>,
+        GetModuleName<ModuleName, Separator, Extract<SubModuleName, string>>,
         Separator
       >;
     }[keyof SubModules]
@@ -140,7 +145,7 @@ type __GetModuleActions<
   Separator extends string = '/'
 > =
   | (IsNonKeyOf<SubModules> extends false ? GetSubModuleActions<SubModules, ModuleName, Separator> : never)
-  | (IsNonKeyOf<Actions> extends false ? GetRestMaps<ModuleName, Actions & KeyValues, Separator> : never);
+  | (IsNonKeyOf<Actions> extends false ? GetRestMaps<ModuleName, Actions, Separator> : never);
 
 export type GetSubModuleActions<
   SubModules extends any,
@@ -151,7 +156,7 @@ export type GetSubModuleActions<
       [SubModuleName in keyof SubModules]: __GetModuleActions<
         getProperty<SubModules[SubModuleName], 'actions'>,
         getProperty<SubModules[SubModuleName], 'modules'>,
-        GetModuleName<ModuleName, Separator, SubModuleName>,
+        GetModuleName<ModuleName, Separator, Extract<SubModuleName, string>>,
         Separator
       >;
     }[keyof SubModules]
@@ -173,7 +178,7 @@ type __GetModuleGetters<
   Separator extends string = '/'
 > =
   | (IsNonKeyOf<SubModules> extends false ? GetSubModuleGetters<SubModules, ModuleName, Separator> : never)
-  | (IsNonKeyOf<Getters> extends false ? GetGetterReturnType<ModuleName, Getters & KeyValues> : never);
+  | (IsNonKeyOf<Getters> extends false ? GetGetterReturnType<ModuleName, Getters> : never);
 
 export type GetSubModuleGetters<
   SubModules extends any,
@@ -184,7 +189,7 @@ export type GetSubModuleGetters<
       [SubModuleName in keyof SubModules]: __GetModuleGetters<
         getProperty<SubModules[SubModuleName], 'getters'>,
         getProperty<SubModules[SubModuleName], 'modules'>,
-        GetModuleName<ModuleName, Separator, SubModuleName>,
+        GetModuleName<ModuleName, Separator, Extract<SubModuleName, string>>,
         Separator
       >;
     }[keyof SubModules]
